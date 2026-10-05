@@ -6,7 +6,7 @@ hands out target grids. It has no compiler dependency, and that is the whole des
 ## One file per level
 
 ```
-levels/src/main/resources/levels/
+levels/src/commonMain/resources/levels/
   hello-layers.json
   checkerboard.json
   ...
@@ -15,6 +15,39 @@ levels/src/main/resources/levels/
 Each file is the whole level: metadata, the target matrix, and the reference solution as a
 string. There is no second resource, so there is no filename to reference and nothing to go
 missing from a classpath.
+
+### Why those files are *also* compiled into Kotlin source
+
+The JSON above is the source of truth. At build time `GenerateLevelData` turns all of it
+into one generated Kotlin file, `EMBEDDED_LEVEL_JSON`, which becomes a string constant.
+
+That is duplication, and it is deliberate: **reading a resource at runtime is not portable.**
+`Class.getResource` does not exist on wasmJs, so a resource-based catalogue forces either a
+per-target loader or a `expect fun` whose two implementations differ in kind — a filesystem
+read on the JVM, a `fetch` plus a coroutine in a browser. The latter would make `metadata`
+and `resourceIds()` **suspend** and asynchronous, which is a much worse catalogue than the
+one it saves, and it would push an await into the middle of the game's startup for 23 KB of
+text that was known at compile time.
+
+With the data embedded, `metadata`, `load` and `resourceIds()` are plain synchronous calls
+that behave *identically* on both targets, and the `file:`/`jar:` URL branch that existed
+only to survive packaging is simply gone.
+
+The cost is a drift guard, and the guards are split by what they need:
+
+- **`commonTest`** — `LevelCatalogTest`, over the embedded data. Runs on both targets, so it
+  proves the catalogue behaves the same in a browser as on the desktop.
+- **`jvmTest`** — `ReferenceSolutionsTest`, `EmbeddedLevelsTest`, `GenerateTargetsTest`. These
+  need a compiler, or a filesystem to compare against, and there is no equivalent of either
+  in a browser, so they are not stubbed for wasm.
+
+`EmbeddedLevelsTest` is the one that matters: it asserts the embedded string is byte-equal to
+what is on disk. Generated string literals use `json.trimEnd()`, **not** `trimIndent()` —
+`trimIndent` strips the files' two-space indent and quietly changes the content, so the guard
+would fail on a file that is actually correct.
+
+The generator is a task **class** (`GenerateLevelData`), not a `doLast` in the build script:
+a `doLast` captures the script object, which breaks the configuration cache.
 
 ```json
 {
@@ -96,30 +129,38 @@ generation. That is the point.
 
 ## Discovery, and the ordering trap
 
-`resourceIds()` enumerates the resource directory rather than reading a hand-written index,
-so a new level file cannot be silently forgotten. It handles both `file:` URLs (a
-development build, resources are a directory) and `jar:` URLs (a packaged app, resources
-are entries in a jar inside the app image) — which one arrives is *the* difference between
-"works from Gradle" and "fails when packaged", so both are logged by name.
+`resourceIds()` derives the id list from the embedded data rather than reading a
+hand-written index, so a new level cannot be silently forgotten.
 
 Two traps here:
 
-- **`resourceIds()` is discovery order, not curriculum order.** It is sorted, and the
-  classpath enumerates alphabetically, so it gives you `arch, carpet, cathedral, ...`.
-  Curriculum order comes from `sortedBy { difficulty }` in `levels`. Asking for "the first
-  level" via `resourceIds().first()` silently returns `arch` (7×7×7) while the screen you
-  are driving opens `hello-layers` (3×3×3) — and it fails on an assertion with nothing
-  pointing at the cause. Use `LevelCatalog().ids`.
-- **`getResources()` returns a one-shot `Enumeration`.** It has to be counted *and*
-  iterated, and an `Enumeration` cannot be traversed twice, so it is drained with
-  `Collections.list(...)` immediately. Getting this wrong means discovery "works" and
-  finds zero levels.
+- **`resourceIds()` is discovery order, not curriculum order.** It is sorted alphabetically,
+  so it gives you `arch, carpet, cathedral, ...`. Curriculum order comes from
+  `sortedBy { difficulty }` in `ids`. Asking for "the first level" via
+  `resourceIds().first()` silently returns `arch` (7×7×7) while the screen you are driving
+  opens `hello-layers` (3×3×3) — and it fails on an assertion with nothing pointing at the
+  cause. Use `LevelCatalog().ids`.
+
+The two traps this section used to have — `file:` versus `jar:` URLs, and the one-shot
+`Enumeration` from `getResources()` — are gone with the resource loading they described.
+They were the cost of reading a directory that no longer exists at runtime, and that cost
+was paid at startup on every launch.
 
 ## Tests
 
-`./gradlew :levels:test` — 14 tests, ~30 s, because one of them compiles twenty real
-solutions. That is the price of the guarantee, paid once per build rather than once per
-launch.
+`./gradlew :levels:allTests` — both targets. The `jvmTest` half takes ~30 s, because one of
+its tests compiles twenty real solutions. That is the price of the guarantee, paid once per
+build rather than once per launch.
+
+The split is by need, not convenience:
+
+- **`commonTest`** — `LevelCatalogTest`, over the embedded data. Runs in a real browser as
+  well as a JVM, which is the point: it is what makes "the catalogue behaves identically on
+  both targets" a tested claim rather than an intention.
+- **`jvmTest`** — `ReferenceSolutionsTest` needs the Kotlin compiler;
+  `GenerateTargetsTest` needs to write files; `EmbeddedLevelsTest` needs to read the real
+  JSON off disk to compare against the embedded copy. None of that exists in a browser and
+  none of it is worth stubbing, because a stubbed reference-solution test asserts nothing.
 
 The tests worth knowing about:
 
@@ -131,7 +172,11 @@ The tests worth knowing about:
   without this a broken matrix shows up as a campaign quietly one level shorter.
 - **`showEveryLevel`** — prints every target as ASCII. The fastest way to see the campaign
   without launching the game:
-  `./gradlew :levels:test --tests '*showEveryLevel*' --rerun-tasks -i`
+  `./gradlew :levels:jvmTest --tests '*showEveryLevel*' --rerun-tasks -i`
 
 `GenerateTargetsTest` skips itself unless the env var is set, so `./gradlew build` never
 rewrites tracked source files as a side effect of running tests.
+
+The `:levels` → `:scripting` dependency is `jvmTestImplementation` only, and must never
+become `implementation`: that would put the Kotlin compiler back on the level-loading path,
+which is the bug the stored targets exist to remove.

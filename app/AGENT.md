@@ -1,17 +1,110 @@
 # AGENT.md — `:app`
 
-Compose Desktop UI, the game state machine, the renderer, and local progress. The only
-module with UI dependencies, and the only one whose failures need a window to see.
+Compose UI, the game state machine, the renderer, and local progress. The only module with
+UI dependencies, and the only one whose failures need a window to see.
+
+Multiplatform: `jvm` (desktop) and `wasmJs` (browser). Both build from one `commonMain`;
+only the entry point and two factory functions differ.
 
 ## Layout
 
 ```
-app/src/main/kotlin/fr/godox/replikube/app/
-  Main.kt              entry point, startup/exit logging, module locations
+app/src/commonMain/kotlin/fr/godox/replikube/app/
+  App.kt               ReplikubeApp: everything inside the window
   GameModel.kt         the state machine — every rule lives here
                         SolutionTemplates: the per-level editor starter
-  progress/ProgressStore.kt   XDG save file
+  Platform.kt          the ONLY expect declarations in :app
+  progress/
+    ProgressStorage.kt interface: read / write / quarantine
+    ProgressStore.kt   the JSON and the save policy
   render/
+    Projection.kt      camera → screen, pure geometry
+    PaletteColors.kt   colour id → Color
+    Picking.kt         ray-facing voxel pick, Point/Rect/Quad
+    Cutaway.kt         Cutaway(x, y, z) — the highest visible layer per axis
+  ui/
+    GameScreen.kt      the whole screen
+    LevelPicker.kt     the level list
+    VoxelViewport.kt   the Canvas painter; drawScene() is the drawable
+    OrbitState.kt      shared camera, Compose snapshot state
+    CutawayBar.kt      the three X/Y/Z sliders
+    CodeEditor.kt      the text field, gutter, line-error highlight
+    SyntaxHighlight.kt the VisualTransformation and its pure lexer
+    ResultPanel.kt     solved / diff / diagnostic
+    Readout.kt         the pinned coordinate + palette name status line
+    AppTheme.kt        colors
+
+app/src/jvmMain/kotlin/fr/godox/replikube/app/
+  Main.kt                     application {} + Window -> ReplikubeApp
+  Platform.jvm.kt             InProcessScriptRunner, FileProgressStorage
+  progress/FileProgressStorage.kt   temp file + Files.move
+
+app/src/wasmJsMain/kotlin/fr/godox/replikube/app/
+  Main.kt                     ComposeViewport -> ReplikubeApp
+  Platform.wasmJs.kt          the runner and the storage
+  progress/LocalStorageProgressStorage.kt
+  resources/index.html        the host <div> ComposeViewport mounts into
+```
+
+The shared file is `App.kt`, not `Main.kt`, for a mechanical reason: both entry points are
+`Main.kt` in this package, and on the JVM a file's class is its name plus `Kt`, so both would
+be `MainKt` and the compile fails with `Duplicate JVM class name` — a diagnostic that does
+not name either file. `fr.godox.replikube.app.MainKt` is also the `mainClass` in
+`build.gradle.kts`, so it has to stay unique.
+
+## The platform seam
+
+`Platform.kt` holds both `expect` functions, and it is the only place in `:app` that does:
+
+- `platformScriptRunner(): ScriptRunner` — the embedded compiler on the JVM. On wasm it is
+  a runner that returns an `INTERNAL_ERROR` diagnostic saying player code cannot be run
+  there yet; see `:scripting` for why there is no alternative.
+- `platformProgressStorage(): ProgressStorage?` — a file on the JVM, `localStorage` on wasm,
+  nullable because a sandboxed frame or a `file:` document has no storage at all.
+
+Both return an **interface** rather than being an `expect class`. The two `ScriptRunner`s
+share nothing but the interface, so an `expect class` would demand a fictional common
+supertype; and a constructor parameter typed `Path` would drag `java.nio` into `commonMain`.
+
+Both are **functions**, not constructor defaults. Default arguments are resolved on every
+target whether used or not, so `runner: ScriptRunner = InProcessScriptRunner()` would fail
+to compile the wasm target on the default alone. So `GameModel` has no defaults for
+catalog/runner/store — `GameModel.Factory` carries them, and each `main()` builds it.
+
+`GameModel` calls `runner.run` directly, with no `withContext(Dispatchers.IO)`:
+`Dispatchers.IO` has no wasmJs counterpart, and the JVM runner already moves itself off the
+caller's thread.
+
+## Entry points
+
+The two `main()`s are genuinely different shapes and there is no common denominator worth
+having. The JVM opens an OS window it owns and can close, hence `onCloseRequest` and
+`rememberWindowState`; the browser mounts into an element the page already has and has no
+lifecycle the Kotlin code gets to end. Everything *inside* the window is shared as
+`ReplikubeApp`.
+
+`ComposeViewport`, not `CanvasBasedWindow`, which is deprecated in Compose 1.9. It renders
+straight to a canvas and skips the HTML interop layer, so there is no `WebElementView`
+support and no accessibility tree — and the editor is a real text field, which is unusable
+with a screen reader without one. It takes a **container id**, not a canvas id: it creates
+the `<canvas>` itself and sizes it to the element.
+
+## Progress
+
+`ProgressStore` owns the JSON and the save policy; `ProgressStorage` owns durability, and
+that split is what makes the module multiplatform. Durability is a property of the storage
+underneath, and the two implementations are unrelated — a temp file plus `Files.move`
+against a synchronous key write. Folding them into `expect fun read()/write()` would put an
+atomic-move dance and a corrupt-file rename into the common half.
+
+One JSON file at `~/.local/share/replikube/progress.json` (XDG data home) on the JVM,
+written atomically. A per-player file in the repo would put a save file under version
+control for no benefit. On wasm it is `localStorage`, atomic by construction, with the
+previous value copied to a `.bak` key before each write: the browser refuses a write that
+exceeds quota by *throwing*, mid-play, and the backup makes that recoverable.
+
+`saveFailed` is a state field rather than an exception, because a disk that is full must not
+take the game down — and neither must a browser that refuses a write.
     Projection.kt      camera → screen, pure geometry
     PaletteColors.kt   colour id → Color
     Picking.kt         ray-facing voxel pick, Point/Rect/Quad
@@ -109,24 +202,40 @@ steps). A palette colour is a rendering choice and does not have to survive a co
 check, but *text* does — and `INDIGO` painted in indigo on a dark background is unreadable.
 The lift is the minimum that fixes that, so the colour still looks like itself.
 
-## Progress
-
-One JSON file at `~/.local/share/replikube/progress.json` (XDG data home), written
-atomically. A per-player file in the repo would put a save file under version control for
-no benefit. This is the only persistent write in the project; everything else goes to
-`/tmp`.
-
-`saveFailed` is a state field rather than an exception, because a disk that is full must
-not take the game down.
+This is the only persistent write in the project; everything else goes to `/tmp`.
 
 ## Tests
 
-`./gradlew :app:test` — 108 tests, the largest suite. The renderer is the one part of this
-project a unit test cannot check for you, so two suites render real pixels through
-`ImageComposeScene` with no window:
+The suite is split by source set, and the split is not arbitrary — it is the only honest
+place to put each test:
 
 ```bash
-./gradlew :app:test --tests '*RenderTest*' --rerun-tasks -i
+./gradlew :app:allTests          # both targets
+./gradlew :app:jvmTest           # desktop only
+./gradlew :app:wasmJsBrowserTest # browser only
+```
+
+- **`commonTest`** — `CutawayTest`, `OrbitStateTest`, `PickingTest`, `ProjectionTest`,
+  `SyntaxHighlightTest`. Pure geometry, projection and lexer: nothing platform-shaped, so
+  they run in both a JVM and a real browser. Anything using `Math.*` or `String.format`
+  does *not* belong here — those are `java.lang`, and the browser build has neither.
+- **`jvmTest`** — `GameModelTest`, `ProgressStoreTest`, `GameScreenRenderTest`,
+  `ViewportRenderTest`. The model and store tests are here because they construct a
+  `FileProgressStorage` over a temp directory, so they assert durability rather than
+  policy. The two render suites are here because `ImageComposeScene`, Skia, AWT and
+  ImageIO have no wasm counterpart — and there is no headless pixel buffer in a browser to
+  assert on anyway, so stubbing them would prove nothing.
+
+`wasmJsBrowserTest` needs `CHROME_BIN` to point at a **Chromium-family** browser
+(`CHROME_BIN='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'` on this box).
+Without it the task fails with `Cannot start ChromeHeadless`, which reads as a missing
+browser rather than a wrong one — Edge and Chrome both work, Firefox does not.
+
+The renderer is the one part of this project a unit test cannot check for you, so the two
+render suites render real pixels through `ImageComposeScene` with no window:
+
+```bash
+./gradlew :app:jvmTest --tests '*RenderTest*' --rerun-tasks -i
 open app/build/renders/
 ```
 
@@ -139,6 +248,11 @@ against a hand-built stand-in grid while the level they actually opened was 27 s
 in three colours — the stand-in was *almost* right, which is what made it convincing. Read
 the real target from the shipped matrix. A fixture resembling the real thing is the most
 dangerous kind of unprobed assertion there is.
+
+**Common tests are `fun x() = runTest { ... }`, never `val r = runTest { ... }`.**
+`runBlocking` is JVM-only, and on wasm `runTest` returns a Promise, so a test that stores
+its result in a `val` compiles on the desktop and means nothing in a browser. The
+`fun x() = runTest` shape is the one that is the same statement on both.
 
 You cannot screenshot the running window on this machine (the GNOME portal denies it). The
 headless renders are the substitute, and they are better anyway — they diff.
