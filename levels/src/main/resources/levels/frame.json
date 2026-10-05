@@ -1,0 +1,14 @@
+{
+  "id": "frame",
+  "title": "Picture Frame",
+  "difficulty": 3,
+  "par": 3,
+  "hint": "A frame is only one voxel thick. max(abs(x), abs(z)) is the ring a voxel sits on.",
+  "size": {
+    "x": 5,
+    "y": 5,
+    "z": 5
+  },
+  "target": [0,0,0,0,0,0,0,0,0,0,7,7,7,7,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,7,7,7,7,0,0,0,0,0,0,0,0,0,0],
+  "reference": "return when {\n    y != 0 -> null\n    max(abs(x), abs(z)) == 2 -> ORANGE\n    else -> null\n}"
+}

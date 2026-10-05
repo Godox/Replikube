@@ -1,0 +1,14 @@
+{
+  "id": "hello-layers",
+  "title": "Three Layers",
+  "difficulty": 1,
+  "par": 5,
+  "hint": "Your function is asked once per voxel. `y` is the same for every voxel in a layer.",
+  "size": {
+    "x": 3,
+    "y": 3,
+    "z": 3
+  },
+  "target": [10,10,10,8,8,8,6,6,6,10,10,10,8,8,8,6,6,6,10,10,10,8,8,8,6,6,6],
+  "reference": "return when (y) {\n    1 -> RED\n    0 -> YELLOW\n    else -> GREEN\n}"
+}

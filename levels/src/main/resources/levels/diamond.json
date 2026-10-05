@@ -1,0 +1,14 @@
+{
+  "id": "diamond",
+  "title": "Diamond",
+  "difficulty": 5,
+  "par": 2,
+  "hint": "A diamond is the set of voxels whose per-axis gaps add up to a small number.",
+  "size": {
+    "x": 5,
+    "y": 5,
+    "z": 5
+  },
+  "target": [0,0,0,0,0,0,0,0,0,0,0,0,9,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,0,0,0,9,9,9,0,0,0,9,0,0,0,0,0,0,0,0,0,9,0,0,0,9,9,9,0,9,9,9,9,9,0,9,9,9,0,0,0,9,0,0,0,0,0,0,0,0,0,9,0,0,0,9,9,9,0,0,0,9,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,0,0,0,0,0,0,0,0,0,0,0,0],
+  "reference": "return if (manhattan(x, y, z) <= 2) LIME else null"
+}
