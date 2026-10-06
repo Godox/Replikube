@@ -1,6 +1,21 @@
+import buildsrc.tasks.GenerateDslSources
+
 plugins {
     id("buildsrc.convention.kotlin-multiplatform")
     alias(libs.plugins.kotlinPluginSerialization)
+}
+
+/**
+ * Embeds `:dsl`'s sources as text, so the remote runner can post them to a compiler service.
+ *
+ * The task class is where the reasoning lives; this block only wires it up. The generated file
+ * goes into `commonMain` rather than `wasmJsMain` on purpose: the sources are inert data, and
+ * putting them in the common half means the JVM test suite can assert they are present and
+ * complete without a browser.
+ */
+val generateDslSources by tasks.registering(GenerateDslSources::class) {
+    sourceDirectory.set(layout.projectDirectory.dir("../dsl/src/commonMain/kotlin"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/dslSources/kotlin"))
 }
 
 kotlin {
@@ -8,6 +23,12 @@ kotlin {
     // so the generated `commonMain { }` accessors do not exist. See core/build.gradle.kts.
     sourceSets {
         val commonMain by getting {
+            // The provider is what carries the task dependency -- see the note in
+            // levels/build.gradle.kts, which is the same wiring for the same reason: a stale
+            // `build/generated` would otherwise produce a compile error naming
+            // `DSL_SOURCE` rather than naming the task.
+            kotlin.srcDir(generateDslSources.map { it.outputDirectory })
+
             dependencies {
                 // The sandbox boundary. Nothing here may be referenced by player code:
                 // player code is compiled against `:dsl` only, and reaches this module's
@@ -28,7 +49,7 @@ kotlin {
                 // Drives the Kotlin compiler at runtime to build player solutions. JVM
                 // only: `kotlin-compiler-embeddable` is a JVM application and no compiler
                 // runs inside a browser. The wasm build gets `RemoteScriptRunner` instead,
-                // which sends the same generated source to a compiler service -- see its
+                // which sends the same generated wrapper to a compiler service -- see its
                 // own doc for why that is a change of venue rather than a loss.
                 implementation(libs.kotlinCompilerEmbeddable)
             }
@@ -47,4 +68,10 @@ kotlin {
             }
         }
     }
+}
+
+// Belt and braces on the provider wiring above, for the reason given in levels/build.gradle.kts:
+// the compile task's name differs per target and will differ again for a target added later.
+tasks.matching { it.name.startsWith("compile") && it.name.contains("Kotlin") }.configureEach {
+    dependsOn(generateDslSources)
 }

@@ -2,9 +2,7 @@ package fr.godox.replikube.app
 
 import fr.godox.replikube.app.progress.LocalStorageProgressStorage
 import fr.godox.replikube.app.progress.ProgressStorage
-import fr.godox.replikube.core.GridSize
-import fr.godox.replikube.scripting.Diagnostic
-import fr.godox.replikube.scripting.RunResult
+import fr.godox.replikube.scripting.RemoteScriptRunner
 import fr.godox.replikube.scripting.ScriptRunner
 
 /**
@@ -26,45 +24,27 @@ actual fun platformProgressStorage(): ProgressStorage? =
     runCatching { LocalStorageProgressStorage() }.getOrNull()
 
 /**
- * No runner yet: this is the decision the wasm port has not made.
+ * The remote runner: the player's source goes to a compiler service and comes back as a grid.
  *
- * ### Why this is not `InProcessScriptRunner` behind a flag
+ * ### Why a service rather than a compiler here
  *
  * The JVM runner embeds `kotlin-compiler-embeddable` and drives it on a thread it owns. There
- * is no version of that which works here: no JVM, no filesystem to hold the compiler jar, no
- * threads, and a browser that will not let a module download forty megabytes at startup. So
- * the question for wasm is not *how* to run the compiler but *where* it runs.
+ * is no version of that which works in a browser: no JVM, no filesystem to hold the compiler
+ * jar, no threads, and a page that will not let a module download forty megabytes at startup.
+ * So the question for wasm was never *how* to run the compiler but *where* it runs. The answer
+ * is JetBrains' own playground backend, `api.kotlinlang.org/api/<version>/compiler/run`, which
+ * compiles and runs a set of source files server-side and returns the diagnostics and output.
  *
- * The answer is a compiler service: the wasm build posts the player's source to
- * `api.kotlinlang.org/api/2.4.20/compiler/run`, which compiles and runs it server-side and
- * returns the output. That path has been verified end to end against the stored level
- * matrices; what is not yet written is the client.
+ * ### What this costs, stated plainly
  *
- * ### Why this returns a failing runner rather than throwing
+ * The game is no longer offline, and the sandbox is thinner. Locally, `:dsl` reaches the
+ * compiler as a jar on a classpath holding nothing else; remotely it travels as source text,
+ * because the service has no classpath of ours to extend. The player's reach is therefore
+ * whatever `:dsl` can see — which is why `:dsl` still has no dependencies, now for a second
+ * reason. Both are recorded in `scripting/AGENT.md`.
  *
- * It fails as a *diagnostic* — the same shape as a player's typo — so the whole pipeline above
- * it is exercised and the player sees a sentence instead of a blank screen. `error(...)` in
- * the composition root would take down the game with a stack trace, which tells a player
- * nothing and a developer less than a result panel saying "running code is not available in
- * the browser build yet".
- *
- * Deliberately loud rather than quietly empty: a build that appears to work and never grades
- * anything is worse than one that says it cannot.
+ * What did *not* change is what the player sees: same [ScriptRunner], same diagnostics, and a
+ * compile error pointing at the same line of their own source. `RemoteScriptRunner` builds the
+ * same wrapper `SolutionCompiler` does, so the line mapping is literally the same code.
  */
-actual fun platformScriptRunner(): ScriptRunner = UnavailableRunner
-
-/** A runner that reports that player code cannot be run here, as a normal failure. */
-private object UnavailableRunner : ScriptRunner {
-
-    override suspend fun run(source: String, size: GridSize, timeoutMillis: Long): RunResult =
-        RunResult.Failure(
-            Diagnostic(
-                kind = Diagnostic.Kind.INTERNAL_ERROR,
-                message = "Running code is not available in the browser build yet",
-                detail = "The desktop build compiles player code in-process with the Kotlin " +
-                    "compiler. A browser has no JVM to run it in, so this build has to send " +
-                    "the source to a compiler service instead -- that client is not written " +
-                    "yet. The desktop build is unaffected.",
-            ),
-        )
-}
+actual fun platformScriptRunner(): ScriptRunner = RemoteScriptRunner()

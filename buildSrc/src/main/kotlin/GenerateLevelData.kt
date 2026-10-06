@@ -119,7 +119,7 @@ abstract class GenerateLevelData : DefaultTask() {
  * though no JSON syntax requires it, and a library that did not know that would emit a file
  * that fails to compile with an error pointing at the wrong line.
  */
-private fun kotlinStringLiteral(text: String): String = buildString {
+internal fun kotlinStringLiteral(text: String): String = buildString {
     append('"')
     for (ch in text) {
         when (ch) {
