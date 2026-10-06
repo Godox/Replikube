@@ -14,6 +14,22 @@ kotlin {
     // here only because the Compose Desktop block below configures the `jvm()` target by name.
     jvm()
 
+    // The webpack bundle is emitted as `app.js` -- the Gradle module name -- which is not what
+    // `index.html` loads. It asks for `replikube.js`, gets a 404, and the page stays black
+    // with an empty `#replikubeViewport`: no error, no console message, just a window that
+    // never becomes a game. That failure mode is the reason this line exists rather than a
+    // matching edit to the HTML: renaming the output to the product name fixes it for every
+    // consumer of the built distribution, and leaves the HTML naming the product too.
+    //
+    // Renaming the *Gradle module* would be the other way round, but that name is load-bearing
+    // for Compose's `main` and packaging tasks, and it would be a much larger change to make
+    // a filename match.
+    wasmJs {
+        browser {
+            commonWebpackConfig { outputFileName = "replikube.js" }
+        }
+    }
+
     // `by getting` because the multiplatform plugin arrives via the convention plugin's id,
     // so the generated `commonMain { }` accessors do not exist. See core/build.gradle.kts.
     sourceSets {
