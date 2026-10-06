@@ -19,11 +19,20 @@ plugins {
 }
 
 kotlin {
-    // JDK 17 stays the JVM floor. It is the version the packaged desktop app bundles and
-    // the version `MIN_PLAYER_TARGET` in `:scripting` compiles player code to, so raising
-    // it here without raising it there reintroduces the packaging mismatch documented in
-    // scripting/AGENT.md: a solution compiled to a newer class file version than the app's
-    // own runtime refuses to load, with a message naming neither the level nor the cause.
+    // `jvmToolchain` and `jvmTarget` are different knobs and only one of them is the floor.
+    //
+    // The *toolchain* (in buildSrc/build.gradle.kts) says which JDK runs kotlinc. It is 21,
+    // and it is a convenience, not a constraint.
+    //
+    // This `jvmTarget` says what class file version comes out, and 17 is the real floor: it
+    // is the version the packaged desktop runtime bundles and the version `MIN_PLAYER_TARGET`
+    // in `:scripting` compiles player code to. Raising this without raising it there
+    // reintroduces the packaging mismatch documented in scripting/AGENT.md -- a solution
+    // compiled to a newer class file version than the app's own runtime refuses to load,
+    // with a message naming neither the level nor the cause.
+    //
+    // So the pair is deliberate and not redundant: compiling with 21 while emitting 17
+    // bytecode is what lets a 21-only machine build a build that still runs on 17.
     jvm {
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
     }

@@ -10,8 +10,11 @@ plugins {
 }
 
 kotlin {
-    // Use a specific Java version to make it easier to work in different environments.
-    jvmToolchain(17)
+    // JDK 21 compiles, Java 17 bytecode comes out -- see the note in
+    // `kotlin-multiplatform.gradle.kts`, which is where the shipped `jvmTarget` lives.
+    // Currently unapplied (all five modules take `kotlin-multiplatform`), kept in step with
+    // it anyway so the two conventions cannot drift apart.
+    jvmToolchain(21)
 }
 
 tasks.withType<Test>().configureEach {
