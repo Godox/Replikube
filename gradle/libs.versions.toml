@@ -14,6 +14,8 @@ kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", ver
 kotlinxDatetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kotlinxSerialization = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJSON" }
 kotlinxCoroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+# Test-only, and not in the `kotlinxEcosystem` bundle: it must never reach a shipped classpath.
+kotlinxCoroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 # Compiles player code at runtime. The `kotlin-scripting-*` family no longer ships a
 # usable high-level API in Kotlin 2.x, so we drive the compiler directly.
 kotlinCompilerEmbeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
@@ -27,6 +29,8 @@ kotlinScriptingJvm = { module = "org.jetbrains.kotlin:kotlin-scripting-jvm", ver
 # of step with the plugin.
 composeDesktop = { module = "org.jetbrains.compose.desktop:desktop", version.ref = "compose" }
 
+
+
 # Libraries can be bundled together for easier import
 [bundles]
 kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutines"]
@@ -34,4 +38,4 @@ kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutine
 [plugins]
 kotlinPluginSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-composeDesktop = { id = "org.jetbrains.compose", version.ref = "compose" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose" }

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>replikube</title>
+    <style>
+        /*
+         * Full-bleed and dark.
+         *
+         * The container fills the viewport because the game's layout is measured against it
+         * and refits on every resize; anything around it would be dead space, and a body
+         * margin would leave a strip the resize observer does not account for.
+         *
+         * `touch-action: none` on the container is load-bearing: without it a drag the game
+         * reads as an orbit is also read by the browser as a scroll or a pinch-zoom, and the
+         * page moves under the player's cursor. Compose inserts the canvas as a child, so
+         * the rule has to be on the ancestor that covers it.
+         */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0E1015;
+        }
+
+        #replikubeViewport {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+    <!--
+      The id here is the contract with `VIEWPORT_ID` in Main.kt. They are two halves of one
+      fact and nothing can check them, so both sides name it identically: `VIEWPORT_ID` is a
+      constant rather than a parameter, which means changing the HTML forces a matching edit
+      in Kotlin, where the failure is a compile error rather than a blank page in production.
+
+      It is a container div, not a canvas. ComposeViewport creates the canvas itself and sizes
+      it to this element.
+    -->
+    <div id="replikubeViewport"></div>
+    <script type="application/javascript" src="replikube.js"></script>
+</body>
+</html>

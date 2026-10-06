@@ -1,28 +1,87 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    id("buildsrc.convention.kotlin-jvm")
+    id("buildsrc.convention.kotlin-multiplatform")
     alias(libs.plugins.composeCompiler)
-    alias(libs.plugins.composeDesktop)
-    // No `application` plugin: the Compose plugin provides its own `run` and `package*`
-    // tasks, and `application` collides with `run` at configuration time.
-}
-
-dependencies {
-    implementation(project(":core"))
-    implementation(project(":levels"))
-    implementation(project(":scripting"))
-    implementation(libs.bundles.kotlinxEcosystem)
-
-    // The UI module is the only one that touches Compose. Nothing below it does.
-    implementation(compose.desktop.currentOs)
-
-    testImplementation(kotlin("test"))
-    testImplementation(project(":core"))
+    alias(libs.plugins.composeMultiplatform)
 }
 
 kotlin {
-    jvmToolchain(17)
+    // The desktop entry point is a jvm `main` driven by the Compose plugin's own `run` and
+    // `package*` tasks. `:app` has no `application` plugin because that would collide with
+    // `run` at configuration time.
+    // Declared by the convention plugin (`buildsrc.convention.kotlin-multiplatform`); repeated
+    // here only because the Compose Desktop block below configures the `jvm()` target by name.
+    jvm()
+
+    // The webpack bundle is emitted as `app.js` -- the Gradle module name -- which is not what
+    // `index.html` loads. It asks for `replikube.js`, gets a 404, and the page stays black
+    // with an empty `#replikubeViewport`: no error, no console message, just a window that
+    // never becomes a game. That failure mode is the reason this line exists rather than a
+    // matching edit to the HTML: renaming the output to the product name fixes it for every
+    // consumer of the built distribution, and leaves the HTML naming the product too.
+    //
+    // Renaming the *Gradle module* would be the other way round, but that name is load-bearing
+    // for Compose's `main` and packaging tasks, and it would be a much larger change to make
+    // a filename match.
+    wasmJs {
+        browser {
+            commonWebpackConfig { outputFileName = "replikube.js" }
+        }
+    }
+
+    // `by getting` because the multiplatform plugin arrives via the convention plugin's id,
+    // so the generated `commonMain { }` accessors do not exist. See core/build.gradle.kts.
+    sourceSets {
+        val commonMain by getting {
+            dependencies {
+                // `api` rather than `implementation`: a caller of `:app` needs the `Level` and
+                // `Progress` types that appear in `GameModel`'s signatures, and both come
+                // transitively through here.
+                api(project(":core"))
+                api(project(":levels"))
+
+                // `:scripting` provides the *interface* both targets share. Its JVM
+                // implementation -- the embedded compiler -- is jvmMain-only and is only ever
+                // reached through that interface, which is the whole point of
+                // `platformScriptRunner` in Platform.kt.
+                implementation(project(":scripting"))
+
+                // The UI module is the only one that touches Compose. Nothing below it does.
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.ui)
+                implementation(compose.material3)
+
+                implementation(libs.bundles.kotlinxEcosystem)
+            }
+        }
+        val jvmMain by getting {
+            dependencies {
+                // `compose.desktop.currentOs` is the Skiko-backed AWT/Swing runtime. It is a
+                // jvmMain dependency and *only* a jvmMain one: the wasm target gets its canvas
+                // from the Compose libraries already declared in commonMain above, and pulling
+                // this in there would drag a native Skiko library into a browser build.
+                implementation(compose.desktop.currentOs)
+            }
+        }
+        val jvmTest by getting {
+            dependencies {
+                // The two headless render suites live here: Skia, AWT and ImageIO have no
+                // wasm equivalent, so they are not compiled for the browser rather than being
+                // stubbed out. There is no headless pixel buffer in a browser to assert on
+                // anyway -- the only way to see pixels is a screenshot of a real tab.
+                implementation(project(":core"))
+                implementation(project(":levels"))
+
+                // `ImageComposeScene`, the render tests' entry point, lives in the *desktop*
+                // artifact and has no wasm counterpart. That, rather than any AWT import in
+                // the test sources themselves, is the hard reason these two files cannot be
+                // shared with the browser.
+                implementation(compose.desktop.currentOs)
+            }
+        }
+    }
 }
 
 compose.desktop {

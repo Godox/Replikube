@@ -23,14 +23,19 @@ when (y) {
 ## Build and run
 
 ```bash
-export JAVA_HOME=/home/bob/.jdks/jbrsdk_jcef-21.0.7   # or any JDK 21
-./gradlew :app:run
+export JAVA_HOME=/path/to/jdk-17          # jvmToolchain(17), see below
+./gradlew :app:run                        # desktop
 
-./gradlew test                    # all modules
-./gradlew build                   # compile + test
+./gradlew :app:allTests                   # both targets; see "Targets" for prerequisites
+./gradlew build                           # compile + test
 ./gradlew :app:packageAppImage
 app/build/compose/binaries/main/app/replikube/bin/replikube
 ```
+
+JDK **17** is the floor, not a preference: it is the version the packaged desktop runtime
+bundles and the version `MIN_PLAYER_TARGET` in `:scripting` compiles player code to, so
+raising either without the other silently breaks packaged builds. Gradle resolves the
+toolchain itself; `JAVA_HOME` only tells it which JVM to run under.
 
 `packageAppImage` runs `jpackage --type app-image` and produces a **directory**, not a
 squashfs `.AppImage` — a real `.AppImage` needs `appimagetool` or `linuxdeploy`, which are
@@ -39,7 +44,39 @@ jars.
 
 Set `REPLIKUBE_LOG=/tmp/replikube.log` to capture the log. Without it, logging goes to
 `$XDG_STATE_HOME/replikube/replikube.log` (or `~/.local/state/...`), then the temp
-directory. Always on, mirrored to stderr, truncated at 512 KB, never throws.
+directory. Always on, mirrored to stderr, truncated at 512 KB, never throws. In a browser
+there is no path at all and it goes to `console.*` — see `:core`.
+
+## Targets
+
+Every module is multiplatform with two targets, declared by the convention plugin
+`buildsrc.convention.kotlin-multiplatform` rather than per module:
+
+- **`jvm`** — the desktop app. JDK 17 toolchain, Skia/AWT.
+- **`wasmJs`** — the browser. No JVM, no filesystem, no threads.
+
+Both come from one `commonMain` per module. The split that matters is not "what compiles
+where" but **where a platform decision is made**: each module that needs one puts it behind
+an `expect fun` returning an interface. `:app`'s `Platform.kt` is the clearest example, and
+`:core`'s log is the other.
+
+Three environment prerequisites, all silent when missing:
+
+- **`node` on `PATH`** for any wasm task. `wasmJsBrowserTest` additionally needs it as the
+  JS host for the browser binary.
+- **`CHROME_BIN` pointing at a Chromium-family browser.** Edge and Chrome work; Firefox
+  does not, and Karma's default is Chrome. With it unset the task fails
+  `Cannot start ChromeHeadless`, which reads as a missing browser rather than a wrong one.
+- **~4 GB of free heap for the Kotlin daemon.** `:app`'s wasm *test* executable is the
+  biggest link in the build, and at Gradle's default it dies with `GC overhead limit
+  exceeded` *inside the IR incremental cache*, several phases before the linker starts —
+  so the error names a cache rather than the thing that needs the memory.
+  `kotlin.daemon.jvmargs` in `gradle.properties` already sets this.
+
+Test tasks are per-target: `:app:jvmTest`, `:app:wasmJsBrowserTest`, `:app:allTests`.
+`./gradlew test` is no longer the gate — `test` does not exist as an aggregate the way it
+did under the single-target setup, and running the whole thing in one invocation piles five
+modules' wasm links into one daemon.
 
 ## Module map
 
@@ -47,7 +84,7 @@ Five modules. The dependency direction is the architecture, not an accident.
 
 ```
                         ┌───────────┐
-                        │   :app    │  Compose Desktop — UI only
+                        │   :app    │  Compose MP — UI only, jvm + wasmJs
                         └─────┬─────┘
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
@@ -97,6 +134,12 @@ that lies is worse than no log, which is why `Log.path` resolves `URL`s properly
 than handing `file:/x.jar` to `File` (that parses as a *relative* path and reports a real
 jar as missing).
 
+`Log` is common and delegates to a `LogSink`; the four things a platform actually supplies
+— where the log lives, how a path is described, where the timestamp comes from, what the
+environment is — are `expect fun`s in the same file. This is the pattern to copy: **common
+code, and a small seam of `expect fun`s returning interfaces or values, rather than a
+branch on the target.**
+
 **Comments explain why, not what.** The codebase is comment-dense on purpose: most of the
 volume is recorded reasoning about why an approach was chosen, what was rejected, and what
 would break otherwise. Match that. If you find yourself writing a comment that restates
@@ -108,7 +151,7 @@ against a hand-built 3×3×3 stand-in while the level it opened was 27 solid vox
 colours — the stand-in was *almost* right, which is what made it convincing. Read real
 level matrices and real grids into tests.
 
-**`./gradlew test` is the gate.** 180 tests. A change that cannot be tested here is
+**`./gradlew <module>:allTests` is the gate.** A change that cannot be tested here is
 probably in the wrong module.
 
 **`pkill -f 'binaries/main/app/replikube'` kills your own shell**, because the pattern

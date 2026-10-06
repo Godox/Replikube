@@ -27,6 +27,8 @@ source where that is meaningful, plus the `snippet` for context.
 
 ## Pipeline
 
+Two pipelines, one interface. The JVM is the local one:
+
 ```
 player body
   → SolutionCompiler.generate()   wrap in a class, bake in Level constants, find the offset
@@ -37,12 +39,55 @@ player body
   → RunResult
 ```
 
+The browser cannot run a compiler, so there is nothing to port — only somewhere else to run
+one. `RemoteScriptRunner` posts the same generated wrapper to a compiler service:
+
+```
+player body
+  → SolutionCompiler.generate()   the *same* wrapper, so the same line mapping
+  → RemoteProgram.build()         append a main() that prints the grid; add :dsl as source
+  → POST api.kotlinlang.org/.../compiler/run
+  → toRunResult()                 severity, line base, stream tag, then the printed grid
+  → RunResult
+```
+
+**What the two share is the part the player sees.** Same `Diagnostic.Kind` for the same
+cause, and a compile error on the same line of their own source, because both call
+`SolutionCompiler.generate` and its `playerLineOffset` is the same number. Everything else
+differs: the remote sandbox is weaker, the timeout belongs to the service, and the build
+needs a network.
+
+### Why `RemoteProtocol` is in `commonMain`
+
+None of it needs a browser. Decoding a response, assembling the harness, and turning one
+into a `RunResult` are all string-in/string-out, so they are tested by
+`RemoteProtocolTest` on the JVM against recorded response bodies, in milliseconds, with no
+dependency on a third-party service being up. Only the HTTP call is `wasmJsMain`.
+
+That split is the difference between a protocol that is tested and a protocol that was
+exercised by hand once. The recorded bodies in that test are the ones the service actually
+returned, and the details they pin down are the ones a reasonable guess gets wrong:
+
+| detail | why it matters |
+|---|---|
+| `errors` is keyed by **file name** | the only thing separating "your code is wrong" from "our palette copy is wrong" |
+| `severity` is present, warnings included | an unused variable in the starter text is a warning; treating any entry as fatal rejects working code |
+| `interval.start.line` is **0-based** | `toPlayerLine` is 1-based, so the `+ 1` is the whole content of one test |
+| a timeout is **HTTP 200** on `<errStream>` | no status code and no exception to detect |
+| `text` wraps stdout in `<outStream>` | player `println` must not be mistaken for the answer |
+
 ## The sandbox, concretely
 
 `playerClasspath()` returns **`:dsl` plus the Kotlin stdlib**. Nothing else. `:core`,
 `:app`, and `:scripting` are absent, so a solution cannot reach game internals even by
 fully-qualified name — that is enforced at compile time, not by convention. `noStdlib` and
 `noReflect` are deliberately on so the classpath is exactly what `playerClasspath()` says.
+
+**Remotely that enforcement is gone, and `:dsl`'s empty dependency list is the only thing
+standing in.** The service has no classpath of ours to extend, so `:dsl` travels as source
+text — embedded by the `generateDslSources` task, which is why the `.kt` files in `:dsl`
+stay the single source of truth and `dsl/build.gradle.kts` says the zero-dependency rule now
+has a second reason to hold.
 
 ## The bytecode target bug, and why the code looks defensive
 
